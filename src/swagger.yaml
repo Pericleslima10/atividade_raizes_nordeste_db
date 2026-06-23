@@ -1,0 +1,584 @@
+openapi: 3.0.0
+info:
+  title: API de Pedidos e Usuários
+  version: 1.0.0
+  description: Documentação da API com suporte a Autenticação JWT.
+
+servers:
+  - url: http://localhost:3000
+    description: Servidor de Desenvolvimento
+paths:
+  /usuarios:
+    post:
+      tags:
+        - Autenticação
+      summary: Cadastrar novo usuário
+      description: Cria um novo usuário no sistema. LGPD é obrigatório.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nome, email, senha, termo_lgpd_aceito]
+              properties:
+                nome:
+                  type: string
+                  example: "João Silva"
+                email:
+                  type: string
+                  format: email
+                  example: "joao@example.com"
+                senha:
+                  type: string
+                  minLength: 6
+                  example: "senha123"
+                cpf:
+                  type: string
+                  example: "123.456.789-00"
+                telefone:
+                  type: string
+                  example: "11999999999"
+                termo_lgpd_aceito:
+                  type: boolean
+                  example: true
+                  description: "Aceite dos termos LGPD (obrigatório)"
+      responses:
+        '201':
+          description: Usuário criado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "Sucesso"
+                  codigo:
+                    type: integer
+                    example: 201
+                  mensagem:
+                    type: string
+                    example: "Usuário cadastrado com sucesso!"
+                  dados:
+                    type: object
+                    properties:
+                      id_usuario:
+                        type: integer
+                        example: 1
+                      email:
+                        type: string
+                      nome:
+                        type: string
+                      prox_passo:
+                        type: string
+                        example: "POST /login para obter token JWT"
+                  timestamp:
+                    type: string
+                    format: date-time
+        '409':
+          description: Email já cadastrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+        '422':
+          description: Validação falhou (LGPD não aceito, campos inválidos)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+
+  /login:
+    post:
+      tags:
+        - Autenticação
+      summary: Fazer login e obter token JWT
+      description: Retorna um token JWT válido por 24h
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, senha]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "joao@example.com"
+                senha:
+                  type: string
+                  example: "senha123"
+      responses:
+        '200':
+          description: Login realizado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "Sucesso"
+                  codigo:
+                    type: integer
+                    example: 200
+                  mensagem:
+                    type: string
+                    example: "Login realizado com sucesso!"
+                  dados:
+                    type: object
+                    properties:
+                      id_usuario:
+                        type: integer
+                      email:
+                        type: string
+                      nome:
+                        type: string
+                      perfil:
+                        type: string
+                        enum: [CLIENTE, ADMIN, GERENTE]
+                      token:
+                        type: string
+                        example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      expires_in:
+                        type: string
+                        example: "24h"
+                  timestamp:
+                    type: string
+                    format: date-time
+        '401':
+          description: Credenciais inválidas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+        '403':
+          description: Usuário inativo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+  /pedidos:
+    post:
+      tags:
+        - Pedidos (Fluxo A - Etapa 1)
+      summary: 'CRIAR PEDIDO (Inicia o Fluxo A)'
+      description: |
+        Cria um novo pedido e valida itens, quantidade e disponibilidade.
+        
+        **Fluxo A - Etapa 1 de 3:**
+        1. POST /pedidos (criar) ← AQUI
+        2. POST /pagamentos (processar pagamento)
+        3. GET /pedidos/:id_pedido (visualizar status atualizado)
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [canalPedido, itens, id_unidade]
+              properties:
+                canalPedido:
+                  type: string
+                  enum: [APP, WEB, TOTEM, BALCAO, PICKUP]
+                  example: "TOTEM"
+                  description: "Canal através do qual o pedido foi feito"
+                itens:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [id_produto, quantidade]
+                    properties:
+                      id_produto:
+                        type: integer
+                        example: 1
+                      quantidade:
+                        type: integer
+                        minimum: 1
+                        example: 2
+                id_unidade:
+                  type: integer
+                  example: 1
+                usa_fidelidade:
+                  type: boolean
+                  example: false
+                  description: "Se o cliente quer usar pontos de fidelidade"
+      responses:
+        '201':
+          description: "Pedido criado com sucesso. Próximo: processar pagamento"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "Sucesso"
+                  codigo:
+                    type: integer
+                    example: 201
+                  mensagem:
+                    type: string
+                    example: "Pedido criado com sucesso. Aguardando pagamento."
+                  dados:
+                    type: object
+                    properties:
+                      id_pedido:
+                        type: integer
+                        example: 123
+                      status_pedido:
+                        type: string
+                        example: "AGUARDANDO_PAGAMENTO"
+                      valor_total:
+                        type: number
+                        format: decimal
+                        example: 89.90
+                      canal_pedido:
+                        type: string
+                        example: "TOTEM"
+                      data_pedido:
+                        type: string
+                        format: date-time
+                      prox_passo:
+                        type: string
+                        example: "POST /pagamentos com id_pedido"
+                  timestamp:
+                    type: string
+                    format: date-time
+        '422':
+          description: Validação falhou (canalPedido inválido, itens vazios, etc)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+        '404':
+          description: Unidade ou Produto não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+    get:
+      tags:
+        - Pedidos (Fluxo A - Etapa 1)
+      summary: Listar pedidos com filtros
+      description: Lista todos os pedidos do usuário com opção de filtrar por canal e status
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: canalPedido
+          in: query
+          schema:
+            type: string
+            enum: [APP, WEB, TOTEM, BALCAO, PICKUP]
+          description: Filtrar por canal
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [AGUARDANDO_PAGAMENTO, RECEBIDO, EM_PREPARO, PRONTO, ENTREGUE, CANCELADO]
+          description: Filtrar por status
+        - name: page
+          in: query
+          schema:
+            type: integer
+            example: 1
+          description: Número da página
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            example: 10
+          description: Itens por página
+      responses:
+        '200':
+          description: Pedidos listados com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "Sucesso"
+                  dados:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      pagina:
+                        type: integer
+                      limite:
+                        type: integer
+                      pedidos:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Pedido'
+        '401':
+          description: Não autenticado
+
+  
+
+  /pagamentos:
+    post:
+      tags:
+        - Pagamentos
+      summary: 'PROCESSAR PAGAMENTO (Etapa 2 do Fluxo A)'
+      description: |
+        Processa o pagamento de um pedido e atualiza seu status automaticamente.
+        
+        **Fluxo A - Etapa 2 de 3:**
+        1. POST /pedidos (criar)
+        2. POST /pagamentos (processar pagamento) ← AQUI
+        3. GET /pedidos/:id_pedido (visualizar status RECEBIDO)
+        
+        **Resultado:**
+        - Se APROVADO → Pedido muda para RECEBIDO + Gera 5% em pontos
+        - Se RECUSADO → Pedido permanece AGUARDANDO_PAGAMENTO
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id_pedido, metodo_pagamento]
+              properties:
+                id_pedido:
+                  type: integer
+                  example: 123
+                metodo_pagamento:
+                  type: string
+                  enum: [CREDITO, DEBITO, PIX, DINHEIRO, MOCK]
+                  example: "CREDITO"
+      responses:
+        '200':
+          description: Pagamento processado (aprovado ou recusado)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "Sucesso"
+                  codigo:
+                    type: integer
+                    example: 200
+                  mensagem:
+                    type: string
+                    example: "Pagamento aprovado! Pedido recebido para processamento."
+                  dados:
+                    type: object
+                    properties:
+                      id_pagamento:
+                        type: integer
+                      id_pedido:
+                        type: integer
+                      status_pagamento:
+                        type: string
+                        enum: [APROVADO, RECUSADO]
+                      protocolo:
+                        type: string
+                        description: "Protocolo único da transação (ou null se recusado)"
+                        example: "MOCKABCD123"
+                      novo_status_pedido:
+                        type: string
+                        example: "RECEBIDO"
+                      valor:
+                        type: number
+                        format: decimal
+                      prox_passo:
+                        type: string
+        '422':
+          description: Validação falhou (campo obrigatório faltando)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+        '404':
+          description: Pedido não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+        '409':
+          description: Pedido já foi processado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+    get:
+      tags:
+        - Pagamentos
+      summary: Listar pagamentos do usuário
+      description: Lista todos os pagamentos realizados
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDENTE, APROVADO, RECUSADO, ESTORNADO]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            example: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            example: 10
+      responses:
+        '200':
+          description: Pagamentos listados com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  dados:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      pagina:
+                        type: integer
+                      limite:
+                        type: integer
+                      pagamentos:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Pagamento'
+
+
+
+  /cardapio/{id_unidade}:
+    get:
+      tags:
+        - Cardápio
+      summary: Listar cardápio da unidade
+      description: Retorna o cardápio ativo de uma unidade específica, incluindo a lista de produtos.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id_unidade
+          in: path
+          required: true
+          description: ID da unidade para consulta
+          schema:
+            type: integer
+          example: 2
+      responses:
+        '200':
+          description: Cardápio encontrado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "Sucesso"
+                  cardapio:
+                    type: object
+                    properties:
+                      id_cardapio:
+                        type: integer
+                        example: 5
+                      id_unidade:
+                        type: integer
+                        example: 2
+                      descricao:
+                        type: string
+                        example: "Combo Oxente (Hambúrguer Lampião + Batata + Bebida - Unidade Aracaju)"
+                      ativo:
+                        type: boolean
+                        example: true
+                      produtos:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id_produto:
+                              type: integer
+                            nome:
+                              type: string
+                            preco:
+                              type: number
+        '401':
+          description: Não autenticado (Token ausente ou inválido)
+        '404':
+          description: Cardápio não encontrado
+
+components:
+  schemas:
+    ErroResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "Erro"
+        codigo:
+          type: integer
+          example: 422
+        mensagem:
+          type: string
+          example: "Campo obrigatório faltando"
+        timestamp:
+          type: string
+          format: date-time
+
+    Pedido:
+      type: object
+      properties:
+        id_pedido:
+          type: integer
+        status_pedido:
+          type: string
+          enum: [AGUARDANDO_PAGAMENTO, RECEBIDO, EM_PREPARO, PRONTO, ENTREGUE, CANCELADO]
+        valor_total:
+          type: number
+          format: decimal
+        canal_pedido:
+          type: string
+          enum: [APP, WEB, TOTEM, BALCAO, PICKUP]
+        data_pedido:
+          type: string
+          format: date-time
+        pontos_gerados:
+          type: integer
+
+    
+
+    Pagamento:
+      type: object
+      properties:
+        id_pagamento:
+          type: integer
+        id_pedido:
+          type: integer
+        metodo_pagamento:
+          type: string
+          enum: [CREDITO, DEBITO, PIX, DINHEIRO, MOCK]
+        status_pagamento:
+          type: string
+          enum: [PENDENTE, APROVADO, RECUSADO, ESTORNADO]
+        valor:
+          type: number
+          format: decimal
+        protocolo_gateway:
+          type: string
+          description: "Protocolo único retornado pelo gateway mock"
+        data_transacao:
+          type: string
+          format: date-time
