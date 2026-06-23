@@ -74,4 +74,32 @@ class PedidoController {
         include: [ItensPedido, Pagamentos]
       });
 
-      return pedido ? res.status(200
+      return pedido ? res.status(200).json(pedido) : res.status(404).json({ mensagem: 'Não encontrado.' });
+    } catch (error) {
+      return res.status(500).json({ mensagem: 'Erro ao buscar pedido.' });
+    }
+  }
+
+  static async cancelar(req, res) {
+    const transaction = await sequelize.transaction();
+    try {
+      const pedido = await Pedidos.findOne({ where: { id_pedido: req.params.id_pedido, id_usuario: req.userId }, transaction });
+
+      if (!pedido || !['AGUARDANDO_PAGAMENTO', 'RECEBIDO'].includes(pedido.status_pedido)) {
+        await transaction.rollback();
+        return res.status(409).json({ mensagem: 'Pedido não pode ser cancelado.' });
+      }
+
+      await pedido.update({ status_pedido: 'CANCELADO' }, { transaction });
+      await AuditoriaService.registrar(req.userId, 'PEDIDO', pedido.id_pedido, 'CANCELAR', 'Cancelado pelo usuário');
+      
+      await transaction.commit();
+      return res.status(200).json({ mensagem: 'Cancelado com sucesso.' });
+    } catch (error) {
+      await transaction.rollback();
+      return res.status(500).json({ mensagem: 'Erro ao cancelar.' });
+    }
+  }
+}
+
+module.exports = PedidoController;
